@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Agricultural & Climate Dashboard Conclusion</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f8f9fa;
+      margin: 20px;
+      text-align: center;
+    }
+    h1 {
+      margin-bottom: 1rem;
+    }
+    .chart-container {
+      margin: 20px auto;
+      background: white;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+      width: 90%;
+      max-width: 1000px;
+    }
+    svg {
+      display: block;
+      margin: auto;
+      background: #fff;
+      border: 1px solid #ddd;
+    }
+    .legend {
+      font-size: 12px;
+    }
+    .tooltip {
+      position: absolute;
+      padding: 8px;
+      background: rgba(0,0,0,0.7);
+      color: #fff;
+      border-radius: 4px;
+      pointer-events: none;
+      font-size: 12px;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    .play-button {
+      margin-top: 10px;
+      padding: 6px 12px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <h1>Agricultural & Climate Dashboard Conclusion</h1>
+
+  <!-- Panel 1: Historical Trends (Crop Production & CO₂ up to 2020) -->
+  <div class="chart-container" id="panel1">
+    <h2>Historical Trends: Crop Production & CO₂ Emissions (up to 2020)</h2>
+    <svg id="chart1" width="900" height="500"></svg>
+  </div>
+
+  <!-- Panel 2: Recent Climate Trends (2020–2024) -->
+  <div class="chart-container" id="panel2">
+    <h2>Recent Climate Trends (2020–2024)</h2>
+    <svg id="chart2" width="900" height="500"></svg>
+    <button class="play-button" id="playBtn">Play Animation</button>
+  </div>
+
+  <div id="tooltip" class="tooltip"></div>
+
+  <script>
+    // CSV URLs
+    const CROP_CSV_URL = "https://gist.githubusercontent.com/mystrycodes/3d3cf36c88a4f23a187cb4e12a835e10/raw/CropProduction.csv";
+    const CO2_CSV_URL  = "https://gist.githubusercontent.com/mystrycodes/f3e133db6c35f1f7180296e872441fe4/raw/Co2emmission.csv";
+    const CLIMATE_CSV_URL = "https://gist.githubusercontent.com/mystrycodes/0e4190865121859997eec1fc2d5b4dcd/raw/d10453ccf854feb48e10319eb8025a973f938abe/climate.csv";
+
+    // Tooltip selection
+    const tooltip = d3.select("#tooltip");
+
+    // ---------------------------
+    // Panel 1: Historical Trends (Crop & CO₂)
+    // ---------------------------
+    Promise.all([
+      // Crop: expecting columns TIME, Value, Country; use only US and years <= 2020
+      d3.csv(CROP_CSV_URL, d => ({
+        year: +d.TIME,
+        production: +d.Value,
+        country: d.Country
+      })).then(data => data.filter(d => d.country && d.country.includes("United States") && d.year <= 2020)),
+      // CO₂: expecting columns Year, total_emission, Country; use only US and years <= 2020
+      d3.csv(CO2_CSV_URL, d => ({
+        year: +d.Year,
+        co2: +d.total_emission,
+        country: d.Country
+      })).then(data => data.filter(d => d.country && d.country.includes("United States") && d.year <= 2020))
+    ]).then(([cropData, co2Data]) => {
+      // Merge datasets on common years
+      const commonYears = [...new Set(cropData.map(d => d.year))]
+                          .filter(y => co2Data.some(d => d.year === y))
+                          .sort((a, b) => a - b);
+      const merged1 = commonYears.map(year => {
+        const crop = cropData.find(d => d.year === year);
+        const co2  = co2Data.find(d => d.year === year);
+        return {
+          year: year,
+          production: crop.production,
+          co2: co2.co2
+        };
+      });
+      drawPanel1(merged1);
+    }).catch(error => {
+      console.error("Error loading Crop/CO₂ data:", error);
+    });
+
+    function drawPanel1(data) {
+      const svg = d3.select("#chart1");
+      const width = +svg.attr("width") - 100;
+      const height = +svg.attr("height") - 100;
+      const margin = { top: 50, right: 80, bottom: 50, left: 80 };
+
+      const g = svg.append("g")
+                   .attr("transform", `translate(${margin.left},${margin.top})`);
+
+      // x-scale: year
+      const x = d3.scaleLinear()
+                  .domain(d3.extent(data, d => d.year))
+                  .range([0, width]);
+      // y-scale for Crop Production
+      const yProd = d3.scaleLinear()
+                      .domain(d3.extent(data, d => d.production)).nice()
+                      .range([height, 0]);
+      // y-scale for CO₂ (convert to Gigatons; assume data is in tons, for example)
+      // Here we assume CO₂ values are large; adjust conversion if needed.
+      const yCO2 = d3.scaleLinear()
+                     .domain(d3.extent(data, d => d.co2)).nice()
+                     .range([height, 0]);
+
+      // Axes
+      const xAxis = d3.axisBottom(x).ticks(6).tickFormat(d3.format("d"));
+      const yAxisLeft = d3.axisLeft(yProd).ticks(6).tickFormat(d3.format(",.0f"));
+      const yAxisRight = d3.axisRight(yCO2).ticks(6).tickFormat(d => (d/1e6).toFixed(2) + " Mt");
+
+      g.append("g")
+       .attr("transform", `translate(0, ${height})`)
+       .call(xAxis);
+      g.append("g")
+       .call(yAxisLeft);
+      g.append("g")
+       .attr("transform", `translate(${width},0)`)
+       .call(yAxisRight);
+
+      // Axis labels
+      g.append("text")
+       .attr("x", width / 2)
+       .attr("y", height + 40)
+       .attr("text-anchor", "middle")
+       .text("Year");
+      g.append("text")
+       .attr("transform", "rotate(-90)")
+       .attr("y", -margin.left + 20)
+       .attr("x", -height / 2)
+       .attr("text-anchor", "middle")
+       .text("Crop Production (t)");
+      g.append("text")
+       .attr("transform", "rotate(90)")
+       .attr("y", -width - margin.right + 20)
+       .attr("x", height / 2)
+       .attr("text-anchor", "middle")
+       .text("CO₂ Emissions (Mt)");
+
+      // Line generators
+      const prodLine = d3.line()
+                         .x(d => x(d.year))
+                         .y(d => yProd(d.production))
+                         .curve(d3.curveMonotoneX);
+      const co2Line = d3.line()
+                        .x(d => x(d.year))
+                        .y(d => yCO2(d.co2))
+                        .curve(d3.curveMonotoneX);
+
+      // Draw lines
+      g.append("path")
+       .datum(data)
+       .attr("class", "line-production")
+       .attr("fill", "none")
+       .attr("stroke", "#2980b9")
+       .attr("stroke-width", 2)
+       .attr("d", prodLine);
+      g.append("path")
+       .datum(data)
+       .attr("class", "line-co2")
+       .attr("fill", "none")
+       .attr("stroke", "#8e44ad")
+       .attr("stroke-width", 2)
+       .attr("d", co2Line);
+
+      // Draw circles with tooltips
+      g.selectAll(".prod-point")
+       .data(data)
+       .enter()
+       .append("circle")
+       .attr("class", "prod-point")
+       .attr("cx", d => x(d.year))
+       .attr("cy", d => yProd(d.production))
+       .attr("r", 4)
+       .attr("fill", "#2980b9")
+       .on("mouseover", (event, d) => {
+         showTooltip(event, `Year: ${d.year}<br>Production: ${d.production.toLocaleString()} t`);
+       })
+       .on("mouseout", hideTooltip);
+      g.selectAll(".co2-point")
+       .data(data)
+       .enter()
+       .append("circle")
+       .attr("class", "co2-point")
+       .attr("cx", d => x(d.year))
+       .attr("cy", d => yCO2(d.co2))
+       .attr("r", 4)
+       .attr("fill", "#8e44ad")
+       .on("mouseover", (event, d) => {
+         showTooltip(event, `Year: ${d.year}<br>CO₂: ${(d.co2/1e6).toFixed(2)} Mt`);
+       })
+       .on("mouseout", hideTooltip);
+
+      // Legend
+      const legend = svg.append("g")
+                        .attr("class", "legend")
+                        .attr("transform", `translate(${width + margin.left + 20}, ${margin.top})`);
+      const legendData = [
+        { label: "Crop Production", color: "#2980b9" },
+        { label: "CO₂ Emissions", color: "#8e44ad" }
+      ];
+      legendData.forEach((d, i) => {
+        const lg = legend.append("g")
+                         .attr("transform", `translate(0, ${i*20})`);
+        lg.append("rect")
+          .attr("width", 12)
+          .attr("height", 12)
+          .attr("fill", d.color);
+        lg.append("text")
+          .attr("x", 16)
+          .attr("y", 10)
+          .text(d.label);
+      });
+    }
+
+    // ---------------------------
+    // Panel 2: Recent Climate Trends (2020–2024)
+    // ---------------------------
+    d3.csv(CLIMATE_CSV_URL, d => ({
+      year: +d.Year,
+      SolarIrradiance: +d.SolarIrradiance,
+      Temperature: +d.Temperature,
+      VegetationIndex: +d.VegetationIndex
+    })).then(climateData => {
+      // Use only climate data from 2020 onward.
+      const recentClimate = climateData.filter(d => d.year >= 2020);
+      if (recentClimate.length === 0) {
+        console.error("No climate data for 2020 or later.");
+        return;
+      }
+      drawPanel2(recentClimate);
+    }).catch(error => {
+      console.error("Error loading climate data:", error);
+    });
+
+    function drawPanel2(data) {
+      const svg = d3.select("#chart2");
+      const width = +svg.attr("width") - 100;
+      const height = +svg.attr("height") - 100;
+      const margin = { top: 50, right: 120, bottom: 50, left: 70 };
+      const g = svg.append("g")
+                   .attr("transform", `translate(${margin.left},${margin.top})`);
+
+      // x-scale: year for climate data (2020 to 2024)
+      const x = d3.scaleLinear()
+                  .domain(d3.extent(data, d => d.year))
+                  .range([0, width]);
+      // y-scale: normalized value [0,1] (we normalize each variable for comparison)
+      const y = d3.scaleLinear()
+                  .domain([0, 1])
+                  .range([height, 0]);
+
+      // Normalize each variable for the animation
+      function normalize(data, key) {
+        const ext = d3.extent(data, d => d[key]);
+        data.forEach(d => {
+          d["norm_" + key] = (d[key] - ext[0]) / (ext[1] - ext[0]);
+        });
+      }
+      normalize(data, "SolarIrradiance");
+      normalize(data, "Temperature");
+      normalize(data, "VegetationIndex");
+
+      // Axes
+      g.append("g")
+       .attr("transform", `translate(0, ${height})`)
+       .call(d3.axisBottom(x).ticks(5).tickFormat(d3.format("d")));
+      g.append("g")
+       .call(d3.axisLeft(y).ticks(5));
+
+      // Legend for climate variables
+      const legend = svg.append("g")
+                        .attr("class", "legend")
+                        .attr("transform", `translate(${width + margin.left + 20}, ${margin.top})`);
+      const climateSeries = [
+        { name: "Solar Irradiance", key: "norm_SolarIrradiance", color: "#f39c12" },
+        { name: "Temperature", key: "norm_Temperature", color: "#e74c3c" },
+        { name: "Vegetation Index", key: "norm_VegetationIndex", color: "#27ae60" }
+      ];
+      climateSeries.forEach((s, i) => {
+        const legItem = legend.append("g")
+                              .attr("transform", `translate(0, ${i*20})`);
+        legItem.append("rect")
+               .attr("width", 12)
+               .attr("height", 12)
+               .attr("fill", s.color);
+        legItem.append("text")
+               .attr("x", 16)
+               .attr("y", 10)
+               .text(s.name);
+      });
+
+      // Define line generator for climate variables (animated)
+      const lineGen = d3.line()
+                        .x(d => x(d.year))
+                        .y(d => y(d.value))
+                        .curve(d3.curveCardinal);
+
+      // For each climate variable, draw and animate its line.
+      climateSeries.forEach(s => {
+        const seriesData = data.map(d => ({ year: d.year, value: d[s.key] }));
+        const path = g.append("path")
+                      .datum(seriesData)
+                      .attr("fill", "none")
+                      .attr("stroke", s.color)
+                      .attr("stroke-width", 2)
+                      .attr("d", lineGen);
+        // Animate the line drawing.
+        const totalLength = path.node().getTotalLength();
+        path.attr("stroke-dasharray", totalLength + " " + totalLength)
+            .attr("stroke-dashoffset", totalLength)
+            .transition()
+            .duration(2000)
+            .ease(d3.easeLinear)
+            .attr("stroke-dashoffset", 0);
+      });
+      
+      // Optionally add circles on data points with tooltips.
+      data.forEach(d => {
+        climateSeries.forEach(s => {
+          g.append("circle")
+           .attr("cx", x(d.year))
+           .attr("cy", y(d[s.key]))
+           .attr("r", 3)
+           .attr("fill", s.color)
+           .on("mouseover", (event) => {
+             showTooltip(event, `Year: ${d.year}<br>${s.name}: ${(d[s.key]*100).toFixed(1)}%`);
+           })
+           .on("mouseout", hideTooltip);
+        });
+      });
+    }
+
+    // ---------------------------
+    // Tooltip functions
+    function showTooltip(event, content) {
+      tooltip.style("opacity", 1)
+             .html(content)
+             .style("left", (event.pageX + 10) + "px")
+             .style("top", (event.pageY - 20) + "px");
+    }
+    function hideTooltip() {
+      tooltip.style("opacity", 0);
+    }
+  </script>
+</body>
+</html>
