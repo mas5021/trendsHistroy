@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Combined Cultivation & Vegetation Index Chart</title>
+  <title>Crop Production & Vegetation Index Comparison</title>
   <script src="https://d3js.org/d3.v7.min.js"></script>
   <style>
     body {
@@ -36,7 +36,7 @@
     }
     .tooltip {
       position: absolute;
-      background: rgba(0, 0, 0, 0.8);
+      background: rgba(0,0,0,0.8);
       color: #fff;
       padding: 8px;
       border-radius: 4px;
@@ -48,34 +48,41 @@
   </style>
 </head>
 <body>
-  <h1>US Crop Production & Vegetation Index</h1>
+  <h1>US Crop Production vs Vegetation Index</h1>
   <svg id="chart" width="900" height="500"></svg>
   <div id="tooltip" class="tooltip"></div>
   
   <script>
-    // CSV URLs for the datasets:
-    // CropProduction.csv is assumed to have columns: TIME, Value, Country
-    // Climate.csv is assumed to have columns: Year, VegetationIndex, (and others)
+    // Helper function to check for US records
+    function isUS(country) {
+      if (!country) return false;
+      const c = country.toLowerCase();
+      return c.includes("united states") || c.includes("usa") || c.includes("america");
+    }
+
+    // CSV URLs (using your actual URLs)
     const CROP_CSV_URL = "https://gist.githubusercontent.com/mystrycodes/3d3cf36c88a4f23a187cb4e12a835e10/raw/5aebb1fc334be000f4b756db6d5c83adf71e89ab/CropProduction.csv";
     const CLIMATE_CSV_URL = "https://gist.githubusercontent.com/mystrycodes/0e4190865121859997eec1fc2d5b4dcd/raw/d10453ccf854feb48e10319eb8025a973f938abe/climate.csv";
 
-    // Load the datasets concurrently.
+    // Load datasets concurrently.
     Promise.all([
+      // Crop Production: expects columns TIME, Value, Country.
       d3.csv(CROP_CSV_URL, d => ({
         year: +d.TIME,
         production: +d.Value,
         country: d.Country
-      })).then(data =>
-        data.filter(d => d.country && d.country.includes("United States") && d.year <= 2020)
-      ),
+      })).then(data => data.filter(d => isUS(d.country) && d.year <= 2020)),
+      
+      // Climate: expects columns Year, VegetationIndex (and others).
       d3.csv(CLIMATE_CSV_URL, d => ({
         year: +d.Year,
         VegetationIndex: +d.VegetationIndex
-      })).then(data =>
-        data.filter(d => d.year >= 2020)
-      )
+      })).then(data => data.filter(d => d.year >= 2020))
     ]).then(([cropData, climateData]) => {
-      // Determine the x-axis domain based on both datasets.
+      console.log("Crop Data (US, ≤2020):", cropData.length, cropData);
+      console.log("Climate Data (≥2020):", climateData.length, climateData);
+
+      // Define x-domain as the minimum year from cropData and maximum from climateData.
       const xDomain = [
         d3.min(cropData, d => d.year),
         d3.max(climateData, d => d.year)
@@ -95,12 +102,12 @@
                   .domain(xDomain)
                   .range([0, width]);
 
-      // y-scale for crop production (left axis)
+      // y-scale for crop production (left axis): use actual production values.
       const yProd = d3.scaleLinear()
                       .domain(d3.extent(cropData, d => d.production)).nice()
                       .range([height, 0]);
 
-      // y-scale for VegetationIndex (right axis)
+      // y-scale for Vegetation Index (right axis)
       const yVeg = d3.scaleLinear()
                      .domain(d3.extent(climateData, d => d.VegetationIndex)).nice()
                      .range([height, 0]);
@@ -141,12 +148,11 @@
        .attr("text-anchor", "middle")
        .text("Vegetation Index");
 
-      // Line generator for Crop Production.
+      // Line generator for crop production.
       const prodLine = d3.line()
                          .x(d => x(d.year))
                          .y(d => yProd(d.production))
                          .curve(d3.curveMonotoneX);
-
       // Draw the Crop Production line.
       g.append("path")
        .datum(cropData)
@@ -161,7 +167,6 @@
                         .x(d => x(d.year))
                         .y(d => yVeg(d.VegetationIndex))
                         .curve(d3.curveMonotoneX);
-
       // Draw the Vegetation Index line with animation.
       const vegPath = g.append("path")
                        .datum(climateData)
@@ -170,7 +175,6 @@
                        .attr("stroke", "#27ae60")
                        .attr("stroke-width", 2)
                        .attr("d", vegLine);
-
       const totalLength = vegPath.node().getTotalLength();
       vegPath.attr("stroke-dasharray", totalLength + " " + totalLength)
              .attr("stroke-dashoffset", totalLength)
@@ -179,7 +183,7 @@
              .ease(d3.easeLinear)
              .attr("stroke-dashoffset", 0);
 
-      // Draw circles for Crop Production with tooltips.
+      // Draw circles for Crop Production points.
       g.selectAll(".prod-point")
        .data(cropData)
        .enter()
@@ -194,7 +198,7 @@
        })
        .on("mouseout", hideTooltip);
 
-      // Draw circles for Vegetation Index with tooltips.
+      // Draw circles for Vegetation Index points.
       g.selectAll(".veg-point")
        .data(climateData)
        .enter()
