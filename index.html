@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Aggregate Comparison: Crop Production vs Vegetation Index</title>
+  <title>How Climate Factors Affect Vegetation</title>
   <script src="https://d3js.org/d3.v7.min.js"></script>
   <style>
     body {
@@ -14,25 +14,15 @@
     h1 {
       margin-bottom: 1rem;
     }
-    svg {
+    #chart {
+      margin: auto;
       background: #fff;
       border: 1px solid #ddd;
-      margin: auto;
       display: block;
-    }
-    .bar {
-      fill: steelblue;
-    }
-    .bar:hover {
-      fill: darkorange;
-    }
-    .axis-label {
-      font-size: 14px;
-      font-weight: bold;
     }
     .tooltip {
       position: absolute;
-      background: rgba(0,0,0,0.75);
+      background: rgba(0, 0, 0, 0.75);
       color: #fff;
       padding: 8px;
       border-radius: 4px;
@@ -41,137 +31,148 @@
       opacity: 0;
       transition: opacity 0.2s;
     }
+    select {
+      margin-bottom: 10px;
+      font-size: 14px;
+      padding: 4px;
+    }
   </style>
 </head>
 <body>
-  <h1>US Aggregate Comparison: Crop Production & Vegetation Index</h1>
-  <svg id="chart" width="600" height="400"></svg>
+  <h1>How Climate Factors Affect Vegetation</h1>
+  <p>Select climate factor for X-axis:</p>
+  <select id="xVarSelect">
+    <option value="SolarIrradiance">Solar Irradiance</option>
+    <option value="CloudCover">Cloud Cover</option>
+    <option value="Precipitation">Precipitation</option>
+    <option value="Temperature">Temperature</option>
+  </select>
+  <svg id="chart" width="800" height="500"></svg>
   <div id="tooltip" class="tooltip"></div>
-  
+
   <script>
-    // CSV URLs
-    const CROP_CSV_URL = "https://gist.githubusercontent.com/mystrycodes/3d3cf36c88a4f23a187cb4e12a835e10/raw/5aebb1fc334be000f4b756db6d5c83adf71e89ab/CropProduction.csv";
     const CLIMATE_CSV_URL = "https://gist.githubusercontent.com/mystrycodes/0e4190865121859997eec1fc2d5b4dcd/raw/d10453ccf854feb48e10319eb8025a973f938abe/climate.csv";
 
-    // Helper function to check if a record is for US
-    function isUS(country) {
-      if (!country) return false;
-      const lower = country.toLowerCase();
-      return lower.includes("united states");
-    }
+    // Set up SVG dimensions and margins.
+    const svg = d3.select("#chart");
+    const width = +svg.attr("width") - 100;
+    const height = +svg.attr("height") - 100;
+    const margin = { top: 50, right: 50, bottom: 50, left: 70 };
 
-    // Load CropProduction.csv and Climate.csv concurrently.
-    Promise.all([
-      d3.csv(CROP_CSV_URL, d => ({
-        year: +d.TIME,
-        production: +d.Value,
-        country: d.Country
-      })).then(data => data.filter(d => isUS(d.country) && d.year <= 2020)),
-      d3.csv(CLIMATE_CSV_URL, d => ({
-        year: +d.Year,
-        VegetationIndex: +d.VegetationIndex
-      })).then(data => data.filter(d => d.year >= 2020))
-    ]).then(([cropData, climateData]) => {
-      console.log("Crop Data (US, ≤2020):", cropData.length, cropData);
-      console.log("Climate Data (≥2020):", climateData.length, climateData);
-      
-      // Check that we have data
-      if(cropData.length === 0 || climateData.length === 0) {
-        console.error("One of the datasets is empty. Check your filtering.");
-        return;
-      }
-      
-      // Compute the average crop production from cropData.
-      const avgProduction = d3.mean(cropData, d => d.production);
-      // Compute the average Vegetation Index from climateData.
-      const avgVegIndex = d3.mean(climateData, d => d.VegetationIndex);
-      
-      // Build summary data array.
-      const summaryData = [
-        { category: "Crop Production", value: avgProduction, unit: "t" },
-        { category: "Vegetation Index", value: avgVegIndex, unit: "" }
-      ];
-      
-      drawBarChart(summaryData);
-    }).catch(error => {
-      console.error("Error loading data:", error);
-    });
+    const g = svg.append("g")
+                 .attr("transform", `translate(${margin.left}, ${margin.top})`);
 
-    function drawBarChart(data) {
-      const svg = d3.select("#chart");
-      const width = +svg.attr("width");
-      const height = +svg.attr("height");
-      const margin = { top: 40, right: 20, bottom: 80, left: 80 };
-      const chartWidth = width - margin.left - margin.right;
-      const chartHeight = height - margin.top - margin.bottom;
+    const tooltip = d3.select("#tooltip");
 
-      const g = svg.append("g")
-                   .attr("transform", `translate(${margin.left},${margin.top})`);
+    // Load climate data.
+    d3.csv(CLIMATE_CSV_URL, d => ({
+      Year: +d.Year,
+      SolarIrradiance: +d.SolarIrradiance,
+      CloudCover: +d.CloudCover,
+      Precipitation: +d.Precipitation,
+      Temperature: +d.Temperature,
+      VegetationIndex: +d.VegetationIndex
+    })).then(data => {
+      // Filter out any rows with missing values.
+      data = data.filter(d => !isNaN(d.Year) && !isNaN(d.VegetationIndex));
 
-      // x-scale: categories.
-      const x = d3.scaleBand()
-                  .domain(data.map(d => d.category))
-                  .range([0, chartWidth])
-                  .padding(0.4);
+      // Function to update the scatterplot given the chosen x variable.
+      function updatePlot(xVar) {
+        // Remove previous chart elements.
+        g.selectAll("*").remove();
 
-      // y-scale: from 0 to max average (raw values)
-      const y = d3.scaleLinear()
-                  .domain([0, d3.max(data, d => d.value) * 1.1])
-                  .range([chartHeight, 0]);
+        // x-scale: based on the selected climate variable.
+        const x = d3.scaleLinear()
+                    .domain(d3.extent(data, d => d[xVar])).nice()
+                    .range([0, width]);
 
-      // x-axis.
-      g.append("g")
-       .attr("transform", `translate(0, ${chartHeight})`)
-       .call(d3.axisBottom(x))
-       .selectAll("text")
-       .attr("transform", "rotate(-40)")
-       .style("text-anchor", "end");
+        // y-scale: VegetationIndex (y-axis).
+        const y = d3.scaleLinear()
+                    .domain(d3.extent(data, d => d.VegetationIndex)).nice()
+                    .range([height, 0]);
 
-      // y-axis with comma formatting.
-      g.append("g")
-       .call(d3.axisLeft(y).ticks(6).tickFormat(d3.format(",.0f")));
-
-      // Bars with animation.
-      const bars = g.selectAll(".bar")
-                    .data(data)
-                    .enter()
-                    .append("rect")
-                    .attr("class", "bar")
-                    .attr("x", d => x(d.category))
-                    .attr("y", chartHeight)
-                    .attr("width", x.bandwidth())
-                    .attr("height", 0)
-                    .on("mouseover", (event, d) => {
-                      d3.select("#tooltip")
-                        .style("opacity", 1)
-                        .html(`<strong>${d.category}</strong><br>Average: ${d.value.toFixed(2)} ${d.unit}`)
-                        .style("left", (event.pageX + 10) + "px")
-                        .style("top", (event.pageY - 20) + "px");
-                    })
-                    .on("mouseout", () => {
-                      d3.select("#tooltip").style("opacity", 0);
-                    });
-      
-      bars.transition()
-          .duration(1000)
-          .attr("y", d => y(d.value))
-          .attr("height", d => chartHeight - y(d.value));
-
-      // Axis Labels.
-      svg.append("text")
-         .attr("class", "axis-label")
-         .attr("transform", `translate(${margin.left + chartWidth/2}, ${height - 10})`)
+        // Draw x-axis.
+        g.append("g")
+         .attr("transform", `translate(0, ${height})`)
+         .call(d3.axisBottom(x));
+        // x-axis label.
+        g.append("text")
+         .attr("x", width / 2)
+         .attr("y", height + 40)
          .attr("text-anchor", "middle")
-         .text("Variable");
+         .text(xVar);
 
-      svg.append("text")
-         .attr("class", "axis-label")
+        // Draw y-axis.
+        g.append("g")
+         .call(d3.axisLeft(y));
+        // y-axis label.
+        g.append("text")
          .attr("transform", "rotate(-90)")
-         .attr("x", -(margin.top + chartHeight/2))
-         .attr("y", 20)
+         .attr("x", -height / 2)
+         .attr("y", -50)
          .attr("text-anchor", "middle")
-         .text("Average Value (raw)");
-    }
+         .text("Vegetation Index");
+
+        // Draw data points.
+        g.selectAll("circle")
+         .data(data)
+         .enter().append("circle")
+         .attr("cx", d => x(d[xVar]))
+         .attr("cy", d => y(d.VegetationIndex))
+         .attr("r", 5)
+         .attr("fill", "#27ae60")
+         .on("mouseover", (event, d) => {
+           tooltip.style("opacity", 1)
+                  .html(`Year: ${d.Year}<br>${xVar}: ${d[xVar]}<br>Vegetation Index: ${d.VegetationIndex.toFixed(2)}`)
+                  .style("left", (event.pageX + 10) + "px")
+                  .style("top", (event.pageY - 20) + "px");
+         })
+         .on("mouseout", () => {
+           tooltip.style("opacity", 0);
+         });
+
+        // Optionally, add a regression line.
+        const regression = linearRegression(data.map(d => [d[xVar], d.VegetationIndex]));
+        const xRange = d3.extent(data, d => d[xVar]);
+        const regLine = [
+          { x: xRange[0], y: regression.intercept + regression.slope * xRange[0] },
+          { x: xRange[1], y: regression.intercept + regression.slope * xRange[1] }
+        ];
+        g.append("line")
+         .attr("x1", x(regLine[0].x))
+         .attr("y1", y(regLine[0].y))
+         .attr("x2", x(regLine[1].x))
+         .attr("y2", y(regLine[1].y))
+         .attr("stroke", "red")
+         .attr("stroke-width", 2)
+         .attr("stroke-dasharray", "5,5");
+      }
+
+      // Compute a simple linear regression given data points as [x, y] pairs.
+      function linearRegression(dataPoints) {
+        const n = dataPoints.length;
+        let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
+        dataPoints.forEach(([x, y]) => {
+          sumX += x;
+          sumY += y;
+          sumXY += x * y;
+          sumXX += x * x;
+        });
+        const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
+        const intercept = (sumY - slope * sumX) / n;
+        return { slope, intercept };
+      }
+
+      // Initially plot using "SolarIrradiance" as the x-axis.
+      updatePlot("SolarIrradiance");
+
+      // Update the plot when the dropdown value changes.
+      d3.select("#xVarSelect").on("change", function() {
+        updatePlot(this.value);
+      });
+    }).catch(error => {
+      console.error("Error loading climate data:", error);
+    });
   </script>
 </body>
 </html>
